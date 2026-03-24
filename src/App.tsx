@@ -72,6 +72,7 @@ export default function App() {
 
   const riskAgent = useMemo(() => {
     const apiKey = process.env.GROQ_API_KEY;
+    console.log('[DEBUG] GROQ_API_KEY present:', !!apiKey, 'value prefix:', apiKey?.slice(0, 8));
     return apiKey ? new RiskAgentService(apiKey) : null;
   }, []);
 
