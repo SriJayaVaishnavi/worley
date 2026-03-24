@@ -70,11 +70,7 @@ export default function App() {
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<'brief' | 'simulate' | 'twin' | 'challenge'>('brief');
 
-  const riskAgent = useMemo(() => {
-    const apiKey = process.env.GROQ_API_KEY;
-    console.log('[DEBUG] GROQ_API_KEY present:', !!apiKey, 'value prefix:', apiKey?.slice(0, 8));
-    return apiKey ? new RiskAgentService(apiKey) : null;
-  }, []);
+  const riskAgent = useMemo(() => new RiskAgentService(), []);
 
   // Core Logic: Delta Detection
   const deltas = useMemo(() => {

@@ -1,15 +1,23 @@
-import Groq from "groq-sdk";
-import { ProjectTask, Delta, RiskInsight, StructuredExplanation } from "../types";
+import { Delta, RiskInsight, StructuredExplanation } from "../types";
 
 const MODEL_NAME = "llama-3.3-70b-versatile";
 
-export class RiskAgentService {
-  private groq: Groq;
+async function chatCompletion(messages: { role: string; content: string }[]): Promise<string> {
+  const res = await fetch('/api/groq', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, model: MODEL_NAME }),
+  });
 
-  constructor(apiKey: string) {
-    this.groq = new Groq({ apiKey, dangerouslyAllowBrowser: true });
+  if (!res.ok) {
+    throw new Error(`API error: ${res.status}`);
   }
 
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+export class RiskAgentService {
   async explainRisk(risk: RiskInsight, relatedDeltas: Delta[]): Promise<{ text: string; structured: StructuredExplanation }> {
     const prompt = `
 ### ROLE: Worley Executive Intelligence Agent
@@ -37,12 +45,7 @@ ${relatedDeltas.map(d => `- [${d.type}] ${d.issue}: ${d.evidence}`).join('\n')}
 - Return ONLY the JSON object. No markdown fences, no extra text.
     `;
 
-    const response = await this.groq.chat.completions.create({
-      model: MODEL_NAME,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = response.choices[0]?.message?.content || "";
+    const raw = await chatCompletion([{ role: "user", content: prompt }]);
 
     try {
       const cleaned = raw.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
@@ -89,12 +92,7 @@ Evidence: ${relatedDeltas.map(d => `[${d.type}] ${d.issue}: ${d.evidence}`).join
 Keep response under 100 words. Be direct and evidence-backed. No filler.
     `;
 
-    const response = await this.groq.chat.completions.create({
-      model: MODEL_NAME,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    return response.choices[0]?.message?.content || "Unable to process challenge.";
+    return await chatCompletion([{ role: "user", content: prompt }]) || "Unable to process challenge.";
   }
 
   async getDeadlyDeltaInsight(taskName: string, delayDays: number, isCritical: boolean): Promise<string> {
@@ -114,12 +112,7 @@ Be specific to EPC/energy infrastructure context. Reference concrete downstream 
 No filler. No introduction.
     `;
 
-    const response = await this.groq.chat.completions.create({
-      model: MODEL_NAME,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    return response.choices[0]?.message?.content || "";
+    return await chatCompletion([{ role: "user", content: prompt }]) || "";
   }
 
   async copilotChat(history: { role: 'user' | 'model', parts: { text: string }[] }[], message: string, context: { risks: RiskInsight[], deltas: Delta[] }): Promise<string> {
@@ -139,7 +132,7 @@ No filler. No introduction.
       - Anonymize vendor names if they appear (e.g., use Vendor_A).
     `;
 
-    const messages: { role: 'system' | 'user' | 'assistant', content: string }[] = [
+    const messages: { role: string; content: string }[] = [
       { role: 'system', content: systemInstruction },
     ];
 
@@ -152,11 +145,6 @@ No filler. No introduction.
 
     messages.push({ role: 'user', content: message });
 
-    const response = await this.groq.chat.completions.create({
-      model: MODEL_NAME,
-      messages,
-    });
-
-    return response.choices[0]?.message?.content || "I'm sorry, I couldn't process that request.";
+    return await chatCompletion(messages) || "I'm sorry, I couldn't process that request.";
   }
 }
