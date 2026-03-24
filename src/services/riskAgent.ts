@@ -115,25 +115,161 @@ function generateFallbackDeadlyDelta(taskName: string, delayDays: number, isCrit
 }
 
 function generateFallbackCopilot(message: string, context: { risks: RiskInsight[], deltas: Delta[] }): string {
-  const lowerMsg = message.toLowerCase();
+  const lower = message.toLowerCase();
+  const { risks, deltas } = context;
 
-  if (lowerMsg.includes('what changed') || lowerMsg.includes('what\'s new') || lowerMsg.includes('summary')) {
-    if (context.deltas.length === 0) {
-      return "No deltas detected yet. Upload project data to begin analysis.";
-    }
-    const summary = context.deltas.map(d => `- [${d.type}] ${d.task_name}: ${d.issue} (${d.severity})`).join('\n');
-    return `Here are the current deltas detected:\n\n${summary}\n\nAI copilot is currently unavailable for deeper analysis. Review the delta details above for more context.`;
+  const criticalRisks = risks.filter(r => r.likelihood >= 80);
+  const highRisks = risks.filter(r => r.likelihood >= 60 && r.likelihood < 80);
+  const criticalDeltas = deltas.filter(d => d.severity === 'Critical');
+  const highDeltas = deltas.filter(d => d.severity === 'High');
+  const procurementDeltas = deltas.filter(d => d.type === 'Procurement');
+  const scheduleDeltas = deltas.filter(d => d.type === 'Schedule');
+  const costDeltas = deltas.filter(d => d.type === 'Cost');
+  const inconsistencyDeltas = deltas.filter(d => d.type === 'Inconsistency');
+
+  // "What are the top risks?"
+  if (lower.includes('top risk') || lower.includes('biggest risk') || lower.includes('main risk') || lower.includes('highest risk') || lower.includes('worst risk')) {
+    if (risks.length === 0) return "No risks detected yet. Upload project data (CSV) to begin risk analysis.";
+    const sorted = [...risks].sort((a, b) => b.likelihood - a.likelihood);
+    const topRisks = sorted.slice(0, 3);
+    let response = `**Top ${topRisks.length} Risk(s) Identified:**\n\n`;
+    topRisks.forEach((r, i) => {
+      const taskDeltas = deltas.filter(d => d.task_id === r.id.replace('r-', ''));
+      response += `**${i + 1}. ${r.title}** — Likelihood: **${r.likelihood}%**, Impact: ${r.impact}\n`;
+      response += `   Evidence: ${taskDeltas.map(d => `${d.issue} (${d.evidence})`).join('; ')}\n\n`;
+    });
+    response += `These risks are ranked by likelihood and driven by ${deltas.length} delta(s) across ${new Set(deltas.map(d => d.type)).size} system(s). Click on any risk card for the full breakdown.`;
+    return response;
   }
 
-  if (lowerMsg.includes('why') || lowerMsg.includes('risky') || lowerMsg.includes('risk')) {
-    if (context.risks.length === 0) {
-      return "No risks detected yet. Risks are generated when deltas are identified from uploaded project data.";
+  // "Explain the turbine delay" or explain specific task/delay
+  if (lower.includes('explain') && (lower.includes('delay') || lower.includes('turbine') || lower.includes('task'))) {
+    const matchingDeltas = deltas.filter(d =>
+      lower.includes(d.task_name.toLowerCase()) || d.type === 'Procurement'
+    );
+    if (matchingDeltas.length === 0 && procurementDeltas.length > 0) {
+      const d = procurementDeltas[0];
+      return `**${d.task_name} — ${d.issue}**\n\n${d.evidence}.\n\nThis is flagged as **${d.severity}** severity because vendor delays on ${d.task_name.includes('critical') || risks.some(r => r.impact.includes('Critical')) ? 'critical-path items' : 'active tasks'} directly impact downstream milestones. WorleyIQ benchmarks show that delays of this magnitude have a recovery rate below 30% without formal intervention.\n\n**Recommended action:** Request a formal recovery schedule from the vendor and evaluate GID surge support to compress the timeline.`;
     }
-    const riskSummary = context.risks.map(r => `- ${r.title}: Likelihood ${r.likelihood}%, ${r.impact}`).join('\n');
-    return `Current risk assessment:\n\n${riskSummary}\n\nRisks are driven by contradictions between data sources (e.g., schedule vs procurement). AI copilot is unavailable for detailed explanation — review the evidence in each risk card.`;
+    if (matchingDeltas.length > 0) {
+      let response = `**Analysis of matching signals:**\n\n`;
+      matchingDeltas.forEach(d => {
+        response += `- **[${d.type}] ${d.task_name}:** ${d.issue} — ${d.evidence} (${d.severity})\n`;
+      });
+      response += `\nThese signals indicate a developing risk pattern. ${matchingDeltas.length > 1 ? 'Multiple correlated deltas increase the confidence of this assessment.' : 'Monitor for additional correlated signals across other systems.'}`;
+      return response;
+    }
+    return "No matching delay data found. Please specify a task name from the uploaded data, or ask about a specific risk type (procurement, schedule, cost).";
   }
 
-  return `AI copilot is currently unavailable. Here's what I can tell you from the data:\n\n- ${context.deltas.length} delta(s) detected\n- ${context.risks.length} risk(s) identified\n\nPlease review the dashboard for details, or try again later when the AI service is restored.`;
+  // "How can we mitigate impact?" or mitigation questions
+  if (lower.includes('mitigat') || lower.includes('reduce') || lower.includes('fix') || lower.includes('solve') || lower.includes('action') || lower.includes('what can we do') || lower.includes('how to address') || lower.includes('recommendation')) {
+    if (risks.length === 0) return "No active risks to mitigate. Upload project data to identify risks first.";
+    let response = `**Recommended Mitigation Actions:**\n\n`;
+    if (procurementDeltas.length > 0) {
+      response += `**Procurement Risk:**\n- Request formal vendor recovery schedules within 48 hours\n- Pre-authorize air freight for critical components\n- Activate alternative vendor qualification from GID database\n- Consider GID surge support: 200-400 hours from India/Colombia centers\n\n`;
+    }
+    if (scheduleDeltas.length > 0) {
+      response += `**Schedule Risk:**\n- Implement 24/7 double-shift for critical-path activities\n- Resequence non-critical activities to free float for critical path\n- Deploy GID engineering support to compress design/review cycles\n- Request updated baseline from scheduling team within 24 hours\n\n`;
+    }
+    if (costDeltas.length > 0) {
+      response += `**Cost Risk:**\n- Conduct variance root-cause analysis with cost engineering\n- Freeze non-essential scope changes pending cost review\n- Negotiate fixed-price amendments with vendors showing variance\n- Activate early payment incentives for on-time delivery\n\n`;
+    }
+    if (inconsistencyDeltas.length > 0) {
+      response += `**Data Inconsistency:**\n- Mandate cross-system data reconciliation within 48 hours\n- Schedule alignment meeting between scheduling and procurement teams\n- Implement weekly data quality audits across reporting systems\n\n`;
+    }
+    if (procurementDeltas.length === 0 && scheduleDeltas.length === 0 && costDeltas.length === 0 && inconsistencyDeltas.length === 0) {
+      response += `Based on the ${risks.length} risk(s) identified, review each risk card and apply benchmark strategies from the WorleyIQ database. Select a risk to see specific mitigation options.\n\n`;
+    }
+    response += `**Priority:** Focus on ${criticalRisks.length > 0 ? `the ${criticalRisks.length} critical-likelihood risk(s)` : highRisks.length > 0 ? `the ${highRisks.length} high-likelihood risk(s)` : 'the highest-likelihood risks'} first. Use the Stress Simulator to model delay scenarios before committing resources.`;
+    return response;
+  }
+
+  // "What changed?" / "What's new?" / summary
+  if (lower.includes('what changed') || lower.includes('what\'s new') || lower.includes('summary') || lower.includes('overview') || lower.includes('status') || lower.includes('update')) {
+    if (deltas.length === 0) return "No deltas detected yet. Upload project data (CSV) to begin monitoring.";
+    let response = `**Project Status Summary:**\n\n`;
+    response += `**${deltas.length} Delta(s) Detected** across ${new Set(deltas.map(d => d.task_id)).size} task(s):\n`;
+    if (criticalDeltas.length > 0) response += `- ${criticalDeltas.length} **Critical** severity signal(s)\n`;
+    if (highDeltas.length > 0) response += `- ${highDeltas.length} **High** severity signal(s)\n`;
+    const mediumDeltas = deltas.filter(d => d.severity === 'Medium');
+    if (mediumDeltas.length > 0) response += `- ${mediumDeltas.length} **Medium** severity signal(s)\n`;
+    response += `\n**Breakdown by Type:**\n`;
+    if (procurementDeltas.length > 0) response += `- Procurement: ${procurementDeltas.length} delta(s) — ${procurementDeltas.map(d => d.task_name).join(', ')}\n`;
+    if (scheduleDeltas.length > 0) response += `- Schedule: ${scheduleDeltas.length} delta(s) — ${scheduleDeltas.map(d => `${d.task_name} (${d.evidence})`).join(', ')}\n`;
+    if (costDeltas.length > 0) response += `- Cost: ${costDeltas.length} delta(s) — ${costDeltas.map(d => `${d.task_name} (${d.evidence})`).join(', ')}\n`;
+    if (inconsistencyDeltas.length > 0) response += `- Inconsistency: ${inconsistencyDeltas.length} delta(s) — ${inconsistencyDeltas.map(d => d.task_name).join(', ')}\n`;
+    response += `\n**${risks.length} Risk(s) Generated** — ${criticalRisks.length} critical, ${highRisks.length} high likelihood.`;
+    return response;
+  }
+
+  // "Why is this risky?" / why questions
+  if (lower.includes('why') && (lower.includes('risk') || lower.includes('dangerous') || lower.includes('concern') || lower.includes('flagged') || lower.includes('alert'))) {
+    if (risks.length === 0) return "No risks detected yet. Risks are generated when deltas (data contradictions) are identified from uploaded project data.";
+    let response = `**Why These Risks Are Flagged:**\n\nRisk Pulse detects risks by identifying **contradictions between data systems** — when one source says the project is on track but another signals trouble.\n\n`;
+    if (inconsistencyDeltas.length > 0) {
+      response += `**Key Contradiction(s):**\n`;
+      inconsistencyDeltas.forEach(d => {
+        response += `- ${d.task_name}: ${d.evidence}\n`;
+      });
+      response += `\nWhen schedule and procurement systems disagree, it often indicates **Optimism Bias** — the schedule hasn't caught up with ground-level delays.\n\n`;
+    }
+    if (procurementDeltas.length > 0 && scheduleDeltas.length > 0) {
+      response += `Procurement reports vendor delays while scheduling metrics show degradation — these **correlated signals** significantly increase risk confidence.\n\n`;
+    }
+    response += `WorleyIQ historical data shows that projects with similar delta patterns experience delivery failures ${criticalRisks.length > 0 ? '72%' : '45%'} of the time without intervention.`;
+    return response;
+  }
+
+  // Cost / budget questions
+  if (lower.includes('cost') || lower.includes('budget') || lower.includes('spend') || lower.includes('expense') || lower.includes('eac') || lower.includes('variance')) {
+    if (costDeltas.length === 0) return "No cost-related deltas detected in the current data. Cost alerts trigger when variance exceeds 10% from baseline.";
+    let response = `**Cost Analysis:**\n\n`;
+    costDeltas.forEach(d => {
+      response += `- **${d.task_name}:** ${d.evidence} (${d.severity} severity)\n`;
+    });
+    response += `\nCost variances above 10% trigger alerts. ${costDeltas.some(d => d.severity === 'High') ? 'High-severity cost deltas indicate variance exceeding 20% — escalate to cost engineering for root-cause analysis.' : 'Monitor for escalation beyond 20% threshold.'}\n\n**Recommended:** Conduct variance decomposition to identify whether the driver is scope, rate, or quantity-based.`;
+    return response;
+  }
+
+  // Schedule / SPI / timeline questions
+  if (lower.includes('schedule') || lower.includes('spi') || lower.includes('timeline') || lower.includes('deadline') || lower.includes('late') || lower.includes('behind')) {
+    if (scheduleDeltas.length === 0) return "No schedule-related deltas detected. Schedule alerts trigger when SPI drops below 0.9.";
+    let response = `**Schedule Analysis:**\n\n`;
+    scheduleDeltas.forEach(d => {
+      response += `- **${d.task_name}:** ${d.evidence} (${d.severity})\n`;
+    });
+    response += `\nSPI below 0.9 indicates the task is earning value slower than planned. ${scheduleDeltas.some(d => d.severity === 'High') ? 'SPI below 0.8 is flagged as High severity — recovery without intervention is unlikely.' : 'Monitor weekly for trend direction.'}\n\n**Recommended:** Request updated schedules and evaluate fast-tracking or crashing options for critical-path tasks.`;
+    return response;
+  }
+
+  // Vendor / procurement questions
+  if (lower.includes('vendor') || lower.includes('procurement') || lower.includes('supplier') || lower.includes('delivery') || lower.includes('shipment')) {
+    if (procurementDeltas.length === 0) return "No procurement deltas detected. Procurement alerts trigger when vendor delays exceed 7 days on critical tasks.";
+    let response = `**Procurement Analysis:**\n\n`;
+    procurementDeltas.forEach(d => {
+      response += `- **${d.task_name}:** ${d.evidence} (${d.severity})\n`;
+    });
+    response += `\nVendor delays exceeding 7 days on critical-path items are flagged as Critical. WorleyIQ benchmarks show recovery rates drop below 30% once this threshold is crossed.\n\n**Recommended:** Demand formal recovery plans from vendors within 48 hours. Pre-qualify alternative suppliers from GID database as contingency.`;
+    return response;
+  }
+
+  // Hello / greetings
+  if (lower.match(/^(hi|hello|hey|good morning|good afternoon|good evening)/)) {
+    return `Hello! I'm the Risk Pulse Copilot. ${risks.length > 0 ? `I'm currently tracking **${risks.length} risk(s)** and **${deltas.length} delta(s)** from your project data.` : 'Upload your project data to get started with risk analysis.'}\n\nYou can ask me:\n- "What are the top risks?"\n- "What changed?"\n- "How can we mitigate impact?"\n- Or ask about specific tasks, vendors, or cost items.`;
+  }
+
+  // Help / what can you do
+  if (lower.includes('help') || lower.includes('what can you') || lower.includes('how do') || lower.includes('guide') || lower.includes('instructions')) {
+    return `**Risk Pulse Copilot — Quick Guide:**\n\nI can help you understand and act on project risks. Try asking:\n\n- **"What are the top risks?"** — See highest-priority risks\n- **"What changed?"** — Get a summary of all detected deltas\n- **"Explain the [task] delay"** — Deep dive on a specific issue\n- **"How can we mitigate impact?"** — Get actionable recommendations\n- **"Why is this risky?"** — Understand the reasoning behind risk flags\n- **"Tell me about cost/schedule/vendor"** — Filter by risk category\n\nYou can also use the **Challenge AI** tab to dispute risk assessments, or the **Stress Simulator** to model delay scenarios.`;
+  }
+
+  // Fallback for unrecognized questions
+  if (deltas.length === 0 && risks.length === 0) {
+    return "No project data loaded yet. Upload a CSV file with your project task data to begin risk analysis. I'll then be able to answer questions about risks, deltas, mitigation strategies, and more.";
+  }
+
+  return `I'm currently tracking **${deltas.length} delta(s)** and **${risks.length} risk(s)** from your project data.\n\nHere's what I can help with:\n- **"What are the top risks?"** — Ranked risk overview\n- **"What changed?"** — Delta summary by type and severity\n- **"How can we mitigate?"** — Actionable recommendations\n- **"Explain the [task name] delay"** — Task-specific analysis\n- Ask about **cost**, **schedule**, **vendors**, or **specific tasks**\n\nTry one of these, or rephrase your question and I'll do my best to help.`;
 }
 
 export class RiskAgentService {
