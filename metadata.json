@@ -1,0 +1,5 @@
+{
+  "name": "Explainable Risk Pulse",
+  "description": "An AI-powered agentic copilot that detects emerging project risks by identifying cross-system inconsistencies and explaining them with evidence.",
+  "requestFramePermissions": []
+}
